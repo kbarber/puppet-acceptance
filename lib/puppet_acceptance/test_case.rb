@@ -1,3 +1,5 @@
+require 'resolv'
+
 module PuppetAcceptance
   class TestCase
     require File.expand_path(File.join(File.dirname(__FILE__), 'host'))
@@ -220,6 +222,49 @@ module PuppetAcceptance
       @logger.warn "There is no dashboard host configured" if dashboards.empty?
       fail "Cannot have more than one dashboard host" if dashboards.length > 1
       dashboards.first
+    end
+
+    # This method retrieves the forge hostname from either:
+    # * The environment variable 'forge_host'
+    # * The parameter 'forge_host' from the CONFIG hash in a node definition
+    #
+    # If none of these are available, it falls back to the static
+    # 'forge-acceptance.puppetlabs.lan'
+    #
+    # @return [String] hostname of test forge
+    def forge
+      ENV['forge_host'] || @config['forge_host'] || 'forge-acceptance.puppetlabs.lan'
+    end
+
+    # This method accepts a block and using the puppet resource 'host' will
+    # setup host aliases before and after that block.
+    #
+    # The teardown step is enacted via an ensure to make sure it will always
+    # occur so we don't leave behind traces of the stub.
+    #
+    # @param machine [String] the host to execute this stub
+    # @param hosts [Hash{String=>String}] a hash containing the host to ip
+    #   mappings
+    # @param block [Proc] the block to encapsulate
+    def stub_hosts_on(machine, hosts, &block)
+      hosts.each do |host, ip|
+        on(machine, puppet_resource('host', host, 'ensure=present', "ip=#{ip}"))
+      end
+      yield
+    ensure
+      hosts.each do |host, ip|
+        on(machine, puppet_resource('host', host, 'ensure=absent'))
+      end
+    end
+
+    # This wraps the method `stub_hosts_on` and makes the stub specific to
+    # the forge alias.
+    #
+    # @param machine [String] the host to perform the stub on
+    # @param block [Proc] the block to encapsulate
+    def stub_forge_on(machine, &block)
+      @forge_ip ||= Resolv.getaddress(forge)
+      stub_hosts_on(machine, 'forge.puppetlabs.com' => @forge_ip, &block)
     end
   end
 end
